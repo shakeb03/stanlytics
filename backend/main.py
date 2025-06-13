@@ -7,6 +7,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 import uvicorn
 from pydantic import BaseModel
+import logging
 
 app = FastAPI(title="Stanlytics API", version="1.0.0")
 
@@ -36,12 +37,22 @@ def parse_stan_csv(file_content: str) -> pd.DataFrame:
     try:
         # Read CSV content
         df = pd.read_csv(io.StringIO(file_content))
+
+        # print("Parsed columns:", df.columns.tolist())
+
         
         # Clean column names (remove quotes and whitespace)
         df.columns = df.columns.str.strip().str.replace('"', '')
+        # df.columns.tolist()
+
+        # print("Cleaned column names: %s", df.columns)
+
+
         
+        print(f"Parsed columns: {df.columns.tolist()}")
         # Convert numeric columns
         numeric_columns = ['Product Price', 'Quantity', 'Subtotal', 'Discount Amount', 'Tax Amount', 'Total Amount']
+        logging.info(f"Numeric columns to convert: {numeric_columns}")
         for col in numeric_columns:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
@@ -152,7 +163,8 @@ def calculate_analytics(stan_df: pd.DataFrame, stripe_df: Optional[pd.DataFrame]
         net_profit = net_from_stripe - refund_amount
     
     # Estimate Stan Store fees (typically 5-10%, let's use 7.5%)
-    stan_fees = total_revenue * 0.075
+    # stan_fees = total_revenue * 0.075
+    stan_fees = 0.0
     
     # Adjust net profit to account for Stan fees
     net_profit = net_profit - stan_fees
