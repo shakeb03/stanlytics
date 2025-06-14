@@ -5,3 +5,5 @@ python-multipart
 pydantic
 python-dateutil
 numpy
+scikit-learn
+scipy
