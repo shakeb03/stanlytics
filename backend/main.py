@@ -7,7 +7,6 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 import uvicorn
 from pydantic import BaseModel
-import logging
 
 app = FastAPI(title="Stanlytics API", version="1.0.0")
 
@@ -30,6 +29,8 @@ class AnalyticsResponse(BaseModel):
     total_orders: int
     product_breakdown: List[Dict[str, Any]]
     monthly_revenue: List[Dict[str, Any]]
+    monthly_product_revenue: List[Dict[str, Any]]
+    product_heatmap_data: List[Dict[str, Any]]
     referral_sources: List[Dict[str, Any]]
 
 def parse_stan_csv(file_content: str) -> pd.DataFrame:
@@ -37,22 +38,12 @@ def parse_stan_csv(file_content: str) -> pd.DataFrame:
     try:
         # Read CSV content
         df = pd.read_csv(io.StringIO(file_content))
-
-        # print("Parsed columns:", df.columns.tolist())
-
         
         # Clean column names (remove quotes and whitespace)
         df.columns = df.columns.str.strip().str.replace('"', '')
-        # df.columns.tolist()
-
-        # print("Cleaned column names: %s", df.columns)
-
-
         
-        print(f"Parsed columns: {df.columns.tolist()}")
         # Convert numeric columns
         numeric_columns = ['Product Price', 'Quantity', 'Subtotal', 'Discount Amount', 'Tax Amount', 'Total Amount']
-        logging.info(f"Numeric columns to convert: {numeric_columns}")
         for col in numeric_columns:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
@@ -128,6 +119,52 @@ def calculate_analytics(stan_df: pd.DataFrame, stripe_df: Optional[pd.DataFrame]
                 'orders': int(row['Order ID'])
             })
     
+    # Monthly product-wise revenue breakdown
+    monthly_product_revenue = []
+    if 'Date' in stan_df.columns:
+        # Group by month and product
+        monthly_product_stats = stan_df.groupby([
+            stan_df['Date'].dt.to_period('M'), 
+            'Product Name'
+        ]).agg({
+            'Total Amount': 'sum',
+            'Quantity': 'sum',
+            'Order ID': 'count'
+        }).reset_index()
+        
+        for _, row in monthly_product_stats.iterrows():
+            monthly_product_revenue.append({
+                'month': str(row['Date']),
+                'product_name': row['Product Name'],
+                'revenue': float(row['Total Amount']),
+                'quantity': int(row['Quantity']),
+                'orders': int(row['Order ID'])
+            })
+    
+    # Product heatmap data (hour of day vs day of week)
+    product_heatmap_data = []
+    if 'Date' in stan_df.columns and 'Time' in stan_df.columns:
+        # Create datetime column
+        stan_df['DateTime'] = pd.to_datetime(stan_df['Date'].astype(str) + ' ' + stan_df['Time'].astype(str))
+        stan_df['Hour'] = stan_df['DateTime'].dt.hour
+        stan_df['DayOfWeek'] = stan_df['DateTime'].dt.day_name()
+        
+        # Group by product, hour, and day of week
+        heatmap_stats = stan_df.groupby(['Product Name', 'Hour', 'DayOfWeek']).agg({
+            'Total Amount': 'sum',
+            'Order ID': 'count'
+        }).reset_index()
+        
+        for _, row in heatmap_stats.iterrows():
+            product_heatmap_data.append({
+                'product_name': row['Product Name'],
+                'hour': int(row['Hour']),
+                'day_of_week': row['DayOfWeek'],
+                'revenue': float(row['Total Amount']),
+                'order_count': int(row['Order ID']),
+                'intensity': float(row['Order ID'])  # Use order count for heatmap intensity
+            })
+    
     # Referral source breakdown
     referral_sources = []
     if 'Referral Source' in stan_df.columns:
@@ -163,7 +200,6 @@ def calculate_analytics(stan_df: pd.DataFrame, stripe_df: Optional[pd.DataFrame]
         net_profit = net_from_stripe - refund_amount
     
     # Estimate Stan Store fees (typically 5-10%, let's use 7.5%)
-    # stan_fees = total_revenue * 0.075
     stan_fees = 0.0
     
     # Adjust net profit to account for Stan fees
@@ -179,6 +215,8 @@ def calculate_analytics(stan_df: pd.DataFrame, stripe_df: Optional[pd.DataFrame]
         'total_orders': total_orders,
         'product_breakdown': sorted(product_breakdown, key=lambda x: x['revenue'], reverse=True),
         'monthly_revenue': sorted(monthly_revenue, key=lambda x: x['month']),
+        'monthly_product_revenue': sorted(monthly_product_revenue, key=lambda x: (x['month'], x['revenue']), reverse=True),
+        'product_heatmap_data': product_heatmap_data,
         'referral_sources': sorted(referral_sources, key=lambda x: x['revenue'], reverse=True)
     }
 
