@@ -129,3 +129,6 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+
+#model cache files
+model_cache/
