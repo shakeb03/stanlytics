@@ -32,7 +32,6 @@ Stanlytics makes all of that instantly clear — no spreadsheets or calculators 
 
 ## 📷 Screenshots
 
-> _(Add screenshots below once ready)_  
 > ![Stanlytics Upload Flow](./screenshots/upload.png)  
 > ![Revenue Breakdown Cards](./screenshots/revenue-card.png)  
 > ![Customer Intelligence](./screenshots/customer-intelligence.png)  
