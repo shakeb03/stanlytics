@@ -42,6 +42,7 @@ class AnalyticsResponse(BaseModel):
     anomalies: List[Dict[str, Any]]
     customer_segments: List[Dict[str, Any]]
     model_metrics: Dict[str, Any]
+    order_breakdown: List[Dict[str, Any]]
 
 def parse_stan_csv(file_content: str) -> pd.DataFrame:
     """Parse Stan Store CSV data"""
@@ -97,6 +98,18 @@ def calculate_analytics(stan_df: pd.DataFrame, stripe_df: Optional[pd.DataFrame]
     # Basic revenue calculations from Stan data
     total_revenue = stan_df['Total Amount'].sum()
     total_orders = len(stan_df)
+
+
+    order_level_breakdown = []
+
+    for _, row in stan_df.iterrows():
+        order_level_breakdown.append({
+            'product_name': row['Product Name'],
+            'revenue': float(row['Total Amount']),
+            'quantity_sold': int(row['Quantity']),
+            'order_id': row['Order ID'],
+            'customer_id': row['Customer ID']
+        })
     
     # Product breakdown
     product_breakdown = []
@@ -251,7 +264,8 @@ def calculate_analytics(stan_df: pd.DataFrame, stripe_df: Optional[pd.DataFrame]
         'revenue_forecast': revenue_forecast,
         'anomalies': anomalies,
         'customer_segments': customer_segments,
-        'model_metrics': model_metrics
+        'model_metrics': model_metrics,
+        'order_breakdown': order_level_breakdown
     }
 
 def generate_smart_ml_insights(stan_df, anomalies, customer_segments, revenue_forecast):
