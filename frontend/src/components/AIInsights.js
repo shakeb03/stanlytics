@@ -160,7 +160,7 @@ const AIInsights = ({ data }) => {
             <div>
               <h2 className="text-2xl font-bold">Smart Caching ML Analytics</h2>
               <p className="text-blue-100">
-                Real data only - processed in {data.model_metrics?.total_ml_processing_time || 'N/A'}s
+                processed in {data.model_metrics?.total_ml_processing_time || 'N/A'}s
               </p>
             </div>
           </div>
@@ -264,11 +264,11 @@ const AIInsights = ({ data }) => {
           </div>
         </div>
         
-        <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+        {/* <div className="mt-4 p-3 bg-blue-50 rounded-lg">
           <div className="text-sm font-medium text-blue-800">
             ⚡ 15x faster processing • 🎯 100% real data • 🧠 No synthetic data risk • 📱 Mobile-ready
           </div>
-        </div>
+        </div> */}
       </div>
 
       {/* ML Model Performance Metrics */}
@@ -456,7 +456,7 @@ const AIInsights = ({ data }) => {
             </div>
           </div>
           
-          <div>
+          {/* <div>
             <h4 className="font-medium text-gray-900 mb-3">Architecture Benefits</h4>
             <div className="space-y-1 text-sm">
               <div className="flex items-center">
@@ -476,7 +476,7 @@ const AIInsights = ({ data }) => {
                 <span>Production-ready scalability</span>
               </div>
             </div>
-          </div>
+          </div> */}
         </div>
       </div>
 
