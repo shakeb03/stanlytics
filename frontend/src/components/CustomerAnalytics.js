@@ -35,35 +35,38 @@ const CustomerAnalytics = ({ data }) => {
 
   // Advanced customer segmentation analysis
   const customerAnalysis = useMemo(() => {
+    console.log('Running customer analysis...');
+    console.log('Data:', data);
     // Simulate customer-level data from order data
     const customers = {};
-    
+
     // Extract unique customers and their behavior
-    data.product_breakdown.forEach(product => {
-      // Simulate multiple customers per product
-      const customersPerProduct = Math.floor(product.order_count); // Assume 70% unique customers
-      
-      for (let i = 0; i < customersPerProduct; i++) {
-        const customerId = `customer_${product.product_name}_${i}`;
-        const orderValue = product.revenue / product.order_count;
-        const frequency = Math.floor(Math.random() * 3) + 1; // 1-3 orders
-        
+
+    if (data?.order_breakdown?.forEach) {
+      data.order_breakdown.forEach(order => {
+        // product.orders.forEach(order => {
+        const customerId = order.customer_id; // Use customer ID from the CSV file
+        const orderValue = order.revenue / order.order_count; // Assuming total_value is in the order data
+        const frequency = 1; // Each order represents one purchase
+
         if (!customers[customerId]) {
           customers[customerId] = {
             id: customerId,
             totalSpent: 0,
             orderCount: 0,
-            firstPurchase: new Date(Date.now() - Math.random() * 365 * 24 * 60 * 60 * 1000),
-            lastPurchase: new Date(Date.now() - Math.random() * 30 * 24 * 60 * 60 * 1000),
-            favoriteProduct: product.product_name,
-            location: ['Toronto', 'Vancouver', 'Montreal', 'Calgary'][Math.floor(Math.random() * 4)]
+            firstPurchase: new Date(order.date),
+            lastPurchase: new Date(order.date),
+            // favoriteProduct: product.product_name,
+            location: order.location || 'Unknown' // Use location if available
           };
         }
-        
-        customers[customerId].totalSpent += orderValue * frequency;
+
+        customers[customerId].totalSpent += orderValue;
         customers[customerId].orderCount += frequency;
-      }
-    });
+        customers[customerId].lastPurchase = new Date(order.date); // Update last purchase date
+        // });
+      });
+    }
 
     const customerList = Object.values(customers);
 
@@ -91,15 +94,6 @@ const CustomerAnalytics = ({ data }) => {
     const avgCustomerLifespan = 2.5; // Estimated years
 
     // Segment customers
-    // const segments = {
-    //   champions: rfmData.filter(c => c.recencyScore >= 4 && c.frequencyScore >= 4 && c.monetaryScore >= 4),
-    //   loyalCustomers: rfmData.filter(c => c.recencyScore >= 3 && c.frequencyScore >= 3 && c.monetaryScore >= 3 && !segments?.champions?.includes(c)),
-    //   potentialLoyalists: rfmData.filter(c => c.recencyScore >= 4 && c.frequencyScore <= 2 && c.monetaryScore >= 3),
-    //   atRisk: rfmData.filter(c => c.recencyScore <= 2 && c.frequencyScore >= 3 && c.monetaryScore >= 3),
-    //   cannotLoseThem: rfmData.filter(c => c.recencyScore <= 2 && c.frequencyScore >= 4 && c.monetaryScore >= 5),
-    //   hibernating: rfmData.filter(c => c.recencyScore <= 2 && c.frequencyScore <= 2 && c.monetaryScore <= 2)
-    // };
-
     const champions = rfmData.filter(c => c.recencyScore >= 4 && c.frequencyScore >= 4 && c.monetaryScore >= 4);
     const loyalCustomers = rfmData.filter(c => c.recencyScore >= 3 && c.frequencyScore >= 3 && c.monetaryScore >= 3 && !champions.includes(c));
     const potentialLoyalists = rfmData.filter(c => c.recencyScore >= 4 && c.frequencyScore <= 2 && c.monetaryScore >= 3);
