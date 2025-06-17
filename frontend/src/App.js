@@ -3,6 +3,7 @@ import FileUpload from './components/FileUpload';
 import Dashboard from './components/Dashboard';
 import Header from './components/Header';
 import './App.css';
+import { Analytics } from "@vercel/analytics/react"
 
 function App() {
   const [analyticsData, setAnalyticsData] = useState(null);
@@ -75,6 +76,7 @@ function App() {
             onReset={handleReset}
           />
         )}
+        <Analytics />
       </main>
       
       <footer className="bg-white border-t border-gray-200 mt-16">
