@@ -3,17 +3,21 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import pandas as pd
 import io
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 import uvicorn
 from pydantic import BaseModel
 from smart_ml_engine import SmartCachingMLEngine
 import time
+from csv_mapper import FlexibleCSVMapper
 
 app = FastAPI(title="Stanlytics API", version="1.0.0")
 
 # Initialize Smart Caching ML Engine (loads instantly, no synthetic data!)
 ml_engine = SmartCachingMLEngine()
+
+# Initialize the flexible CSV mapper
+csv_mapper = FlexibleCSVMapper()
 
 # CORS setup for frontend communication
 app.add_middleware(
@@ -43,6 +47,7 @@ class AnalyticsResponse(BaseModel):
     customer_segments: List[Dict[str, Any]]
     model_metrics: Dict[str, Any]
     order_breakdown: List[Dict[str, Any]]
+    csv_metadata: Optional[Dict[str, Any]] = None
 
 def parse_stan_csv(file_content: str) -> pd.DataFrame:
     """Parse Stan Store CSV data"""
@@ -67,137 +72,126 @@ def parse_stan_csv(file_content: str) -> pd.DataFrame:
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error parsing Stan CSV: {str(e)}")
 
-def parse_stripe_csv(file_content: str) -> pd.DataFrame:
-    """Parse Stripe CSV data"""
-    try:
-        # Read CSV content
-        df = pd.read_csv(io.StringIO(file_content))
-        
-        # Clean column names
-        df.columns = df.columns.str.strip().str.replace('"', '')
-        
-        # Convert numeric columns (amounts are in cents)
-        numeric_columns = ['Amount', 'Amount Refunded', 'Fee', 'Net']
-        for col in numeric_columns:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col].astype(str).str.replace(',', ''), errors='coerce')
-                # Convert from cents to dollars
-                df[col] = df[col] / 100
-        
-        # Parse dates
-        if 'Created (UTC)' in df.columns:
-            df['Created (UTC)'] = pd.to_datetime(df['Created (UTC)'], errors='coerce')
-            
-        return df
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Error parsing Stripe CSV: {str(e)}")
+def parse_csv_flexible(file_content: str) -> Tuple[pd.DataFrame, Dict[str, any]]:
+    """Parse any CSV file with automatic header mapping"""
+    return csv_mapper.process_csv(file_content)
 
 def calculate_analytics(stan_df: pd.DataFrame, stripe_df: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
     """Calculate comprehensive analytics from the data using real ML models"""
     
-    # Basic revenue calculations from Stan data
-    total_revenue = stan_df['Total Amount'].sum()
+    # Basic revenue calculations from Stan data using standardized field names
+    total_revenue = stan_df['total_amount'].sum()
     total_orders = len(stan_df)
-
 
     order_level_breakdown = []
 
     for _, row in stan_df.iterrows():
         order_level_breakdown.append({
-            'product_name': row['Product Name'],
-            'revenue': float(row['Total Amount']),
-            'quantity_sold': int(row['Quantity']),
-            'order_id': row['Order ID'],
-            'customer_id': row['Customer ID']
+            'product_name': row['product_name'],
+            'revenue': float(row['total_amount']),
+            'quantity_sold': int(row['quantity']) if 'quantity' in row and pd.notna(row['quantity']) else 1,
+            'order_id': row['order_id'],
+            'customer_id': row['customer_id']
         })
     
     # Product breakdown
     product_breakdown = []
-    product_stats = stan_df.groupby('Product Name').agg({
-        'Total Amount': 'sum',
-        'Quantity': 'sum',
-        'Order ID': 'count'
-    }).reset_index()
+    agg_dict = {
+        'total_amount': 'sum',
+        'order_id': 'count'
+    }
+    if 'quantity' in stan_df.columns:
+        agg_dict['quantity'] = 'sum'
+    
+    product_stats = stan_df.groupby('product_name').agg(agg_dict).reset_index()
     
     for _, row in product_stats.iterrows():
         product_breakdown.append({
-            'product_name': row['Product Name'],
-            'revenue': float(row['Total Amount']),
-            'quantity_sold': int(row['Quantity']),
-            'order_count': int(row['Order ID'])
+            'product_name': row['product_name'],
+            'revenue': float(row['total_amount']),
+            'quantity_sold': int(row['quantity']) if 'quantity' in row and pd.notna(row['quantity']) else 0,
+            'order_count': int(row['order_id'])
         })
     
     # Monthly revenue breakdown
     monthly_revenue = []
-    if 'Date' in stan_df.columns:
-        monthly_stats = stan_df.groupby(stan_df['Date'].dt.to_period('M')).agg({
-            'Total Amount': 'sum',
-            'Order ID': 'count'
+    if 'date' in stan_df.columns and stan_df['date'].dtype == 'datetime64[ns]':
+        monthly_stats = stan_df.groupby(stan_df['date'].dt.to_period('M')).agg({
+            'total_amount': 'sum',
+            'order_id': 'count'
         }).reset_index()
         
         for _, row in monthly_stats.iterrows():
             monthly_revenue.append({
-                'month': str(row['Date']),
-                'revenue': float(row['Total Amount']),
-                'orders': int(row['Order ID'])
+                'month': str(row['date']),
+                'revenue': float(row['total_amount']),
+                'orders': int(row['order_id'])
             })
     
     # Monthly product-wise revenue breakdown
     monthly_product_revenue = []
-    if 'Date' in stan_df.columns:
+    if 'date' in stan_df.columns and stan_df['date'].dtype == 'datetime64[ns]':
+        agg_dict = {
+            'total_amount': 'sum',
+            'order_id': 'count'
+        }
+        if 'quantity' in stan_df.columns:
+            agg_dict['quantity'] = 'sum'
+        
         monthly_product_stats = stan_df.groupby([
-            stan_df['Date'].dt.to_period('M'), 
-            'Product Name'
-        ]).agg({
-            'Total Amount': 'sum',
-            'Quantity': 'sum',
-            'Order ID': 'count'
-        }).reset_index()
+            stan_df['date'].dt.to_period('M'), 
+            'product_name'
+        ]).agg(agg_dict).reset_index()
         
         for _, row in monthly_product_stats.iterrows():
             monthly_product_revenue.append({
-                'month': str(row['Date']),
-                'product_name': row['Product Name'],
-                'revenue': float(row['Total Amount']),
-                'quantity': int(row['Quantity']),
-                'orders': int(row['Order ID'])
+                'month': str(row['date']),
+                'product_name': row['product_name'],
+                'revenue': float(row['total_amount']),
+                'quantity': int(row['quantity']) if 'quantity' in row and pd.notna(row['quantity']) else 0,
+                'orders': int(row['order_id'])
             })
     
     # Product heatmap data (hour of day vs day of week)
     product_heatmap_data = []
-    if 'Date' in stan_df.columns and 'Time' in stan_df.columns:
-        stan_df['DateTime'] = pd.to_datetime(stan_df['Date'].astype(str) + ' ' + stan_df['Time'].astype(str))
-        stan_df['Hour'] = stan_df['DateTime'].dt.hour
-        stan_df['DayOfWeek'] = stan_df['DateTime'].dt.day_name()
-        
-        heatmap_stats = stan_df.groupby(['Product Name', 'Hour', 'DayOfWeek']).agg({
-            'Total Amount': 'sum',
-            'Order ID': 'count'
-        }).reset_index()
+    if 'date' in stan_df.columns and 'time' in stan_df.columns:
+        # Only create DateTime if date parsing was successful and no NaT values
+        if stan_df['date'].dtype == 'datetime64[ns]' and not stan_df['date'].isna().all():
+            stan_df['DateTime'] = pd.to_datetime(stan_df['date'].astype(str) + ' ' + stan_df['time'].astype(str))
+            stan_df['Hour'] = stan_df['DateTime'].dt.hour
+            stan_df['DayOfWeek'] = stan_df['DateTime'].dt.day_name()
+            
+            heatmap_stats = stan_df.groupby(['product_name', 'Hour', 'DayOfWeek']).agg({
+                'total_amount': 'sum',
+                'order_id': 'count'
+            }).reset_index()
+        else:
+            # Skip heatmap if date parsing failed
+            heatmap_stats = pd.DataFrame()
         
         for _, row in heatmap_stats.iterrows():
             product_heatmap_data.append({
-                'product_name': row['Product Name'],
+                'product_name': row['product_name'],
                 'hour': int(row['Hour']),
                 'day_of_week': row['DayOfWeek'],
-                'revenue': float(row['Total Amount']),
-                'order_count': int(row['Order ID']),
-                'intensity': float(row['Order ID'])
+                'revenue': float(row['total_amount']),
+                'order_count': int(row['order_id']),
+                'intensity': float(row['order_id'])
             })
     
     # Referral source breakdown
     referral_sources = []
-    if 'Referral Source' in stan_df.columns:
-        referral_stats = stan_df.groupby('Referral Source').agg({
-            'Total Amount': 'sum',
-            'Order ID': 'count'
+    if 'referral_source' in stan_df.columns:
+        referral_stats = stan_df.groupby('referral_source').agg({
+            'total_amount': 'sum',
+            'order_id': 'count'
         }).reset_index()
         
         for _, row in referral_stats.iterrows():
             referral_sources.append({
-                'source': row['Referral Source'],
-                'revenue': float(row['Total Amount']),
-                'orders': int(row['Order ID'])
+                'source': row['referral_source'],
+                'revenue': float(row['total_amount']),
+                'orders': int(row['order_id'])
             })
     
     # Initialize default values
@@ -208,10 +202,10 @@ def calculate_analytics(stan_df: pd.DataFrame, stripe_df: Optional[pd.DataFrame]
     
     # Enhanced calculations if Stripe data is available
     if stripe_df is not None and not stripe_df.empty:
-        stripe_fees = stripe_df['Fee'].sum()
-        refund_count = len(stripe_df[stripe_df['Amount Refunded'] > 0])
-        refund_amount = stripe_df['Amount Refunded'].sum()
-        net_from_stripe = stripe_df['Net'].sum()
+        stripe_fees = stripe_df['fee'].sum()
+        refund_count = len(stripe_df[stripe_df['amount_refunded'] > 0])
+        refund_amount = stripe_df['amount_refunded'].sum()
+        net_from_stripe = stripe_df['net'].sum()
         net_profit = net_from_stripe - refund_amount
     
     # Estimate Stan Store fees
@@ -275,7 +269,7 @@ def generate_smart_ml_insights(stan_df, anomalies, customer_segments, revenue_fo
     # Revenue forecast insights (based on actual user patterns)
     if revenue_forecast and len(revenue_forecast) > 0:
         # Calculate trend from user's actual data
-        daily_revenue = stan_df.groupby('Date')['Total Amount'].sum()
+        daily_revenue = stan_df.groupby('date')['total_amount'].sum()
         recent_avg = daily_revenue.tail(7).mean() if len(daily_revenue) >= 7 else daily_revenue.mean()
         forecast_avg = sum(f['predicted_revenue'] for f in revenue_forecast) / len(revenue_forecast)
         
@@ -375,23 +369,38 @@ async def analyze_data(
     stripe_file: Optional[UploadFile] = File(None)
 ):
     """
-    Analyze uploaded CSV files and return comprehensive analytics
+    Analyze uploaded CSV files with flexible header mapping
     """
     try:
-        # Read Stan Store file
+        # Read and process Stan Store file
         stan_content = await stan_file.read()
         stan_csv_content = stan_content.decode('utf-8')
-        stan_df = parse_stan_csv(stan_csv_content)
+        stan_df, stan_metadata = parse_csv_flexible(stan_csv_content)
         
-        # Read Stripe file if provided
+        # Validate Stan data
+        if not stan_metadata["mapping_success"]:
+            missing_fields = ", ".join(stan_metadata["missing_required_fields"])
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Missing required fields: {missing_fields}. Please ensure your CSV contains fields for customer_id, order_id, date, product_name, and total_amount."
+            )
+        
+        # Read and process Stripe file if provided
         stripe_df = None
+        stripe_metadata = None
         if stripe_file:
             stripe_content = await stripe_file.read()
             stripe_csv_content = stripe_content.decode('utf-8')
-            stripe_df = parse_stripe_csv(stripe_csv_content)
+            stripe_df, stripe_metadata = parse_csv_flexible(stripe_csv_content)
         
         # Calculate analytics
         analytics = calculate_analytics(stan_df, stripe_df)
+        
+        # Add mapping metadata to response
+        analytics['csv_metadata'] = {
+            'stan_mapping': stan_metadata,
+            'stripe_mapping': stripe_metadata
+        }
         
         return AnalyticsResponse(**analytics)
         
